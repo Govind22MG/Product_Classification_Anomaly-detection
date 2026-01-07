@@ -47,122 +47,125 @@ import cnn_arch
 img_transformer = trans.ToTensor()
 
 # Model Path
-data_folder_path = 'data/'
-pc_model_path = data_folder_path + 'model/PC_MODEL_CEL.pt'
-capsule_model_path = data_folder_path + 'model/CAPSULE_MODEL_CEL.pt'
-leather_model_path = data_folder_path + 'model/LEATHER_MODEL_CEL.pt'
-screw_model_path = data_folder_path + 'model/SCREW_MODEL_CEL.pt'
+DATA_FOLDER_PATH = 'data/'
+MODEL_PATHS = {
+    'product': f'{DATA_FOLDER_PATH}model/PC_MODEL_CEL.pt',
+    'capsule': f'{DATA_FOLDER_PATH}model/CAPSULE_MODEL_CEL.pt',
+    'leather': f'{DATA_FOLDER_PATH}model/LEATHER_MODEL_CEL.pt',
+    'screw': f'{DATA_FOLDER_PATH}model/SCREW_MODEL_CEL.pt'
+}
 
 # Class-labels
 products_labels = ['capsule', 'leather', 'screw']
 condition_labels = ['defective', 'good']
 
 # CNN Model Configs
-pc_in_channels = 1
-pc_out_channels = 3
-dc_in_channels = 1
-dc_out_channels = 2
+MODEL_CONFIGS = {
+    'product': {'in_channels': 1, 'out_channels': 3},
+    'defect': {'in_channels': 1, 'out_channels': 2}
+}
 
-# CNN Instances
-PC_NET = cnn_arch.cnn_model(pc_in_channels, pc_out_channels).to('cpu')
-CAPSULE_NET = cnn_arch.cnn_model_2(dc_in_channels, dc_out_channels).to('cpu')
-LEATHER_NET = cnn_arch.cnn_model_2(dc_in_channels, dc_out_channels).to('cpu')
-SCREW_NET = cnn_arch.cnn_model_2(dc_in_channels, dc_out_channels).to('cpu')
+# Device configuration
+DEVICE = 'cpu'
 
-# Loading model's parameters (configurations, weights, & biases)
-if(os.path.exists(pc_model_path)):
-    PC_NET = torch.load(pc_model_path, map_location='cpu')
-    print('Product Classification Model is Loaded ({}).'.format(pc_model_path))
-else:
-    print('Unable to load model !!')
-    exit(0)
-if(os.path.exists(capsule_model_path)):
-    CAPSULE_NET = torch.load(capsule_model_path, map_location='cpu')
-    print('Capsule Defect Model is Loaded ({}).'.format(capsule_model_path))
-else:
-    print('Unable to load model !!')
-    exit(0)
-if(os.path.exists(leather_model_path)):
-    LEATHER_NET = torch.load(leather_model_path, map_location='cpu')
-    print('Leather Defect Model is Loaded ({}).'.format(leather_model_path))
-else:
-    print('Unable to load model !!')
-    exit(0)
-if(os.path.exists(screw_model_path)):
-    SCREW_NET = torch.load(screw_model_path, map_location='cpu')
-    print('Screw Defect Model is Loaded ({}).'.format(screw_model_path))
-else:
-    print('Unable to load model !!')
-    exit(0)
+# Define model loading function
+def _load_model(model_name, model_path, in_channels, out_channels, model_class):
+    """Load a single model with error handling."""
+    if os.path.exists(model_path):
+        model = torch.load(model_path, map_location=DEVICE)
+        model.eval()  # Set to evaluation mode
+        print(f'{model_name} is Loaded ({model_path}).')
+        return model
+    else:
+        print(f'ERROR: Unable to load {model_name} from {model_path}')
+        raise FileNotFoundError(f'Model not found: {model_path}')
+
+# CNN Instances & Loading
+try:
+    PC_NET = _load_model(
+        'Product Classification Model',
+        MODEL_PATHS['product'],
+        MODEL_CONFIGS['product']['in_channels'],
+        MODEL_CONFIGS['product']['out_channels'],
+        cnn_arch.cnn_model
+    )
+    CAPSULE_NET = _load_model(
+        'Capsule Defect Model',
+        MODEL_PATHS['capsule'],
+        MODEL_CONFIGS['defect']['in_channels'],
+        MODEL_CONFIGS['defect']['out_channels'],
+        cnn_arch.cnn_model_2
+    )
+    LEATHER_NET = _load_model(
+        'Leather Defect Model',
+        MODEL_PATHS['leather'],
+        MODEL_CONFIGS['defect']['in_channels'],
+        MODEL_CONFIGS['defect']['out_channels'],
+        cnn_arch.cnn_model_2
+    )
+    SCREW_NET = _load_model(
+        'Screw Defect Model',
+        MODEL_PATHS['screw'],
+        MODEL_CONFIGS['defect']['in_channels'],
+        MODEL_CONFIGS['defect']['out_channels'],
+        cnn_arch.cnn_model_2
+    )
+except FileNotFoundError as e:
+    print(f'Fatal Error: {e}')
+    exit(1)
+
+# Image preprocessing and prediction helper function
+def _predict_with_model(img, model, target_size=100):
+    """
+    Generic prediction function to reduce code duplication.
+    
+    Args:
+        img: Input image (OpenCV format)
+        model: PyTorch model for inference
+        target_size: Target image size for resizing
+    
+    Returns:
+        Tuple of (prediction probabilities, argmax index)
+    """
+    # Preprocess image
+    img = cv2.resize(img, (target_size, target_size))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    
+    # Convert to tensor
+    with torch.no_grad():
+        x = img_transformer(img).unsqueeze(0)
+        y = model(x)
+    
+    # Convert to numpy and get predictions
+    y = y.detach().cpu().numpy()[0]
+    y_amax = np.argmax(y)
+    
+    return y, y_amax
+
 
 # Product class prediction function
 def product_class_predict(img):
-    # Resize Image to 100x100
-    img = cv2.resize(img, (100, 100))
-    # Colour Coversion : RGB to Gray
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Convert image form to tensor
-    x = img_transformer(img)
-    x = x.unsqueeze(0)
-    # Feedforward into classifier
-    y = PC_NET.forward(x)
-    # Convert tensor array to numpy
-    y = y.detach().numpy()[0]
-    # Get largest of all : arg-max
-    y_amax = np.argmax(y)
-    # Return predictions
-    return(y, y_amax, products_labels[y_amax])
+    """Predict product classification."""
+    y, y_amax = _predict_with_model(img, PC_NET)
+    return y, y_amax, products_labels[y_amax]
+
 
 # Capsule defect prediction function
 def capsule_defect_predict(img):
-    # Resize Image to 100x100
-    img = cv2.resize(img, (100, 100))
-    # Colour Coversion : RGB to Gray
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Convert image form to tensor
-    x = img_transformer(img)
-    x = x.unsqueeze(0)
-    # Feedforward into classifier
-    y = CAPSULE_NET.forward(x)
-    # Convert tensor array to numpy
-    y = y.detach().numpy()[0]
-    # Get largest of all : arg-max
-    y_amax = np.argmax(y)
-    # Return predictions
-    return(y, y_amax, condition_labels[y_amax])
+    """Predict capsule defect classification."""
+    y, y_amax = _predict_with_model(img, CAPSULE_NET)
+    return y, y_amax, condition_labels[y_amax]
+
 
 # Leather defect prediction function
 def leather_defect_predict(img):
-    # Resize Image to 100x100
-    img = cv2.resize(img, (100, 100))
-    # Colour Coversion : RGB to Gray
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Convert image form to tensor
-    x = img_transformer(img)
-    x = x.unsqueeze(0)
-    # Feedforward into classifier
-    y = LEATHER_NET.forward(x)
-    # Convert tensor array to numpy
-    y = y.detach().numpy()[0]
-    # Get largest of all : arg-max
-    y_amax = np.argmax(y)
-    # Return predictions
-    return(y, y_amax, condition_labels[y_amax])
+    """Predict leather defect classification."""
+    y, y_amax = _predict_with_model(img, LEATHER_NET)
+    return y, y_amax, condition_labels[y_amax]
+
 
 # Screw defect prediction function
 def screw_defect_predict(img):
-    # Resize Image to 100x100
-    img = cv2.resize(img, (100, 100))
-    # Colour Coversion : RGB to Gray
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    # Convert image form to tensor
-    x = img_transformer(img)
-    x = x.unsqueeze(0)
-    # Feedforward into classifier
-    y = SCREW_NET.forward(x)
-    # Convert tensor array to numpy
-    y = y.detach().numpy()[0]
-    # Get largest of all : arg-max
-    y_amax = np.argmax(y)
-    # Return predictions
-    return(y, y_amax, condition_labels[y_amax])
+    """Predict screw defect classification."""
+    y, y_amax = _predict_with_model(img, SCREW_NET)
+    return y, y_amax, condition_labels[y_amax]

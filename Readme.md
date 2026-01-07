@@ -196,4 +196,3 @@ Date: September 30, 2024
 - For best results, use images similar to MVTEC-AD dataset (industrial products)
 - GUI is optimized for 960×480 resolution
 - Processing interval can be adjusted via `DISPLAY_IMAGE_INTERVAL` variable
-- Test note
